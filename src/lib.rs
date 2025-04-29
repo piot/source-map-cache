@@ -341,10 +341,17 @@ pub struct FileLineInfo {
     pub relative_file_name: String,
 }
 
+pub struct SourceLineInfo {
+    pub line: String,
+    pub relative_file_name: String,
+}
+
 pub trait SourceMapLookup: Debug {
     fn get_text(&self, node: &Node) -> &str;
     fn get_text_span(&self, span: &Span) -> &str;
     fn get_line(&self, span: &Span) -> FileLineInfo;
+    fn get_relative_path(&self, file_id: FileId) -> String;
+    fn get_source_line(&self, file_id: FileId, row: usize) -> Option<&str>;
 }
 
 #[derive(Debug)]
@@ -364,5 +371,18 @@ impl SourceMapLookup for SourceMapWrapper<'_> {
 
     fn get_line(&self, span: &Span) -> FileLineInfo {
         self.source_map.get_line(span, &self.current_dir)
+    }
+
+    fn get_relative_path(&self, file_id: FileId) -> String {
+        self.source_map
+            .get_relative_path_to(file_id, &self.current_dir)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string()
+    }
+
+    fn get_source_line(&self, file_id: FileId, line_number: usize) -> Option<&str> {
+        self.source_map.get_source_line(file_id, line_number)
     }
 }

@@ -18,7 +18,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-source-map-cache = "0.0.1"
+source-map-cache = "0.0.2"
 ```
 
 ## License
