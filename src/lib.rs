@@ -12,6 +12,52 @@ use std::{fs, io};
 pub mod prelude;
 pub type FileId = u16;
 
+
+pub struct KeepTrackOfSourceLine {
+    pub last_line_info: SourceFileLineInfo,
+    pub current_line: usize,
+}
+
+impl Default for KeepTrackOfSourceLine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl KeepTrackOfSourceLine {
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            last_line_info: SourceFileLineInfo {
+                row: usize::MAX,
+                file_id: usize::MAX,
+            },
+            current_line: usize::MAX,
+        }
+    }
+
+    pub fn check_if_new_line(&mut self, found: &SourceFileLineInfo) -> Option<(usize, usize)> {
+        if self.last_line_info.file_id != found.file_id || found.row != self.current_line {
+            self.last_line_info = found.clone();
+            self.current_line = self.last_line_info.row;
+            Some((self.last_line_info.row, self.last_line_info.row))
+        } else if found.row == self.current_line {
+            None
+        } else {
+            let line_start = self.current_line;
+            self.current_line = found.row;
+            Some((line_start, found.row))
+        }
+    }
+}
+
+#[derive(Eq, PartialEq, Clone)]
+pub struct SourceFileLineInfo {
+    pub row: usize,
+    pub file_id: usize,
+}
+
+
 #[derive(Debug)]
 pub struct FileInfo {
     pub mount_name: String,
@@ -202,6 +248,8 @@ impl SourceMap {
     fn compute_line_offsets(contents: &str) -> Box<[u16]> {
         let mut offsets = Vec::new();
         offsets.push(0);
+
+        // Track positions of all newlines
         for (i, &byte) in contents.as_bytes().iter().enumerate() {
             if byte == b'\n' {
                 // Safety: new line is always encoded as single octet
@@ -209,6 +257,14 @@ impl SourceMap {
                 offsets.push(next_line_start);
             }
         }
+
+        // Always add the end of file position if it's not already there
+        // (happens when file doesn't end with newline)
+        let eof_offset = u16::try_from(contents.len()).expect("too big file");
+        if offsets.last().map_or(true, |&last| last != eof_offset) {
+            offsets.push(eof_offset);
+        }
+
         offsets.into_boxed_slice()
     }
 
@@ -231,9 +287,23 @@ impl SourceMap {
     pub fn get_source_line(&self, file_id: FileId, line_number: usize) -> Option<&str> {
         let file_info = self.cache.get(&file_id)?;
 
+        // Check if the requested line number is valid
+        if line_number == 0 || line_number >= file_info.line_offsets.len() {
+            return None;
+        }
+
         let start_offset = file_info.line_offsets[line_number - 1] as usize;
         let end_offset = file_info.line_offsets[line_number] as usize;
-        Some(&file_info.contents[start_offset..end_offset - 1])
+
+        let line = &file_info.contents[start_offset..end_offset];
+
+        // Remove trailing newline if present.
+        // Some files may not end with a newline.
+        if line.ends_with('\n') {
+            Some(&line[..line.len() - 1])
+        } else {
+            Some(line)
+        }
     }
 
     #[must_use]
@@ -306,7 +376,7 @@ impl SourceMap {
         Self::minimal_relative_path(&absolute_path, current_dir)
     }
 
-    fn get_text(&self, node: &Node) -> &str {
+    pub fn get_text(&self, node: &Node) -> &str {
         self.get_span_source(
             node.span.file_id,
             node.span.offset as usize,
@@ -314,11 +384,11 @@ impl SourceMap {
         )
     }
 
-    fn get_text_span(&self, span: &Span) -> &str {
+    pub fn get_text_span(&self, span: &Span) -> &str {
         self.get_span_source(span.file_id, span.offset as usize, span.length as usize)
     }
 
-    fn get_line(&self, span: &Span, current_dir: &Path) -> FileLineInfo {
+    pub fn get_line(&self, span: &Span, current_dir: &Path) -> FileLineInfo {
         let relative_file_name = self
             .get_relative_path_to(span.file_id, current_dir)
             .unwrap();
